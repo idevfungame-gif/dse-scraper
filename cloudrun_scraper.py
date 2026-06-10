@@ -9,8 +9,7 @@ import re
 from flask import Flask, request, jsonify
 import psycopg2
 from bs4 import BeautifulSoup
-from curl_cffi import requests as c_requests
-from curl_cffi.curl import CurlOpt
+import requests as c_requests
 
 logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(message)s', datefmt='%H:%M:%S')
 logger = logging.getLogger(__name__)
@@ -74,10 +73,12 @@ def ensure_table():
 def fetch_live():
     url = "https://dsebd.org/latest_share_price_scroll_by_value.php"
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-        "Referer": "https://www.dsebd.org/"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+        "Referer": "https://www.dsebd.org/",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.5",
     }
-    response = c_requests.get(url, impersonate="chrome110", headers=headers, curl_options={CurlOpt.IPRESOLVE: 1}, timeout=20)
+    response = c_requests.get(url, headers=headers, timeout=30)
     response.raise_for_status()
     soup = BeautifulSoup(response.content, "html.parser")
     table = soup.find("table", class_="shares-table")
