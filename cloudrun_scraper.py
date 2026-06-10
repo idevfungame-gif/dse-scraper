@@ -152,7 +152,7 @@ def do_scrape():
 def health():
     return jsonify({"status": "healthy", "service": "dse-scraper", "version": "5.1"})
 
-@app.route("/scrape", methods=["POST"])
+@app.route("/scrape", methods=["GET", "POST"])
 def scrape():
     result = do_scrape()
     status_code = 200 if result["status"] in ("ok", "ok_retry", "skipped") else 500
