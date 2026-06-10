@@ -1,7 +1,6 @@
 import datetime
 import time
 import logging
-import socket
 import os
 import json
 import re
@@ -9,17 +8,14 @@ import re
 from flask import Flask, request, jsonify
 import psycopg2
 from bs4 import BeautifulSoup
-import requests as c_requests
+import requests
 
 logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(message)s', datefmt='%H:%M:%S')
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
-DATABASE_URL = os.environ.get("DATABASE_URL")
-if not DATABASE_URL:
-    raise RuntimeError("DATABASE_URL environment variable not set")
-
+DATABASE_URL = os.environ.get("DATABASE_URL", "")
 WHITELIST_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dse_stocks.json")
 
 def load_whitelist():
@@ -27,18 +23,6 @@ def load_whitelist():
         with open(WHITELIST_PATH) as f:
             return set(json.load(f))
     return None
-
-def is_bond(symbol):
-    s = symbol.upper()
-    if re.match(r"^TB\d+Y\d+$", s): return True
-    if "BOND" in s: return True
-    if s.startswith("IBBL"): return True
-    return False
-
-_orig_getaddrinfo = socket.getaddrinfo
-def _getaddrinfo_ipv4(host, port, family=0, type=0, proto=0, flags=0):
-    return _orig_getaddrinfo(host, port, socket.AF_INET, type, proto, flags)
-socket.getaddrinfo = _getaddrinfo_ipv4
 
 def bd_now():
     return datetime.timezone(datetime.timedelta(hours=6))
@@ -63,22 +47,17 @@ def ensure_table():
             PRIMARY KEY (symbol, date)
         )
     """)
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_prices_symbol ON prices(symbol)")
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_prices_symbol_date ON prices(symbol, date DESC)")
     conn.commit()
     cur.close()
     conn.close()
-    logger.info("Table prices ensured")
 
 def fetch_live():
     url = "https://dsebd.org/latest_share_price_scroll_by_value.php"
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
         "Referer": "https://www.dsebd.org/",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.5",
     }
-    response = c_requests.get(url, headers=headers, timeout=30)
+    response = requests.get(url, headers=headers, timeout=30)
     response.raise_for_status()
     soup = BeautifulSoup(response.content, "html.parser")
     table = soup.find("table", class_="shares-table")
@@ -96,9 +75,7 @@ def fetch_live():
 
         ltp = cv(tds[2])
         high = cv(tds[3])
-
         if ltp is not None and high is not None and high > 0 and ltp < high * 0.1:
-            logger.warning(f"SKIP {tds[1].strip().upper()}: LTP={ltp} vs HIGH={high} (corrupted)")
             continue
 
         close_val = cv(tds[2])
@@ -119,11 +96,8 @@ def save(rows):
     whitelist = load_whitelist()
     if whitelist:
         filtered = [r for r in rows if r[0] in whitelist]
-        skipped = len(rows) - len(filtered)
-        if skipped > 0:
-            logger.info(f"Filtered {skipped} non-stock symbols")
     else:
-        filtered = [r for r in rows if not is_bond(r[0])]
+        filtered = rows
 
     if not filtered:
         return 0
@@ -169,15 +143,14 @@ def do_scrape():
         try:
             rows = fetch_live()
             count = save(rows)
-            logger.info(f"RETRY OK {count} stocks saved @ {now.strftime('%H:%M:%S')} BD")
             return {"status": "ok_retry", "stocks_saved": count, "time": now.strftime('%H:%M:%S BD')}
         except Exception as e2:
             logger.error(f"RETRY FAIL: {e2}")
             return {"status": "error", "error": str(e2)}
 
-@app.route("/", methods=["GET"])
+@app.route("/", methods=["GET", "POST"])
 def health():
-    return jsonify({"status": "healthy", "service": "dse-scraper", "version": "5.0"})
+    return jsonify({"status": "healthy", "service": "dse-scraper", "version": "5.1"})
 
 @app.route("/scrape", methods=["POST"])
 def scrape():
@@ -186,7 +159,10 @@ def scrape():
     return jsonify(result), status_code
 
 if __name__ == "__main__":
-    ensure_table()
+    try:
+        ensure_table()
+    except Exception as e:
+        logger.warning(f"Table check failed: {e}")
     port = int(os.environ.get("PORT", 8080))
-    logger.info(f"Starting DSE Scraper v5 on port {port}")
+    logger.info(f"Starting DSE Scraper v5.1 on port {port}")
     app.run(host="0.0.0.0", port=port, debug=False)
