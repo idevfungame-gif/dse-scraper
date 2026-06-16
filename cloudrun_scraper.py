@@ -9,6 +9,8 @@ from flask import Flask, request, jsonify
 import psycopg2
 from bs4 import BeautifulSoup
 import requests
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(message)s', datefmt='%H:%M:%S')
 logger = logging.getLogger(__name__)
@@ -57,7 +59,7 @@ def fetch_live():
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
         "Referer": "https://www.dsebd.org/",
     }
-    response = requests.get(url, headers=headers, timeout=30)
+    response = requests.get(url, headers=headers, timeout=30, verify=False)
     response.raise_for_status()
     soup = BeautifulSoup(response.content, "html.parser")
     table = soup.find("table", class_="shares-table")
